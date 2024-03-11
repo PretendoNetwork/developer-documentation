@@ -1,0 +1,31 @@
+# NEX - Game servers
+
+## Overview
+NEX is the library Nintendo uses for all online features in all 1st party Nintendo Wii U and 3DS titles, and some early 1st party Nintendo Switch titles. 3rd party titles on all 3 systems may also use NEX. Nintendo retired NEX on the Nintendo Switch in 2021 in favor of NPLN. Pretendo does not currently provide any  NPLN libraries for these titles.
+
+Nintendo did not make NEX from scratch. Nintendo licensed the matchmaking/lobby library [Rendez-Vous](http://web.archive.org/web/20180823162719/http://quazal.com/rendez-vous.htm) by French software development company Quazal. A key feature of Rendez-Vous is it's ability to be extended to add new features, and modified to edit existing ones. Nintendo used this high level of extensibility to create NEX, which simplifies the connections quite a bit and builds on them.
+
+<Note>
+Our libraries, by default, are configured to act as the Nintendo NEX version of Rendez-Vous. However all relevant settings may be changed to achive compatibility with other, non-Nintendo made, Rendez-Vous game clients.
+</Note>
+
+There are 2 main components to NEX:
+
+- Transport
+- Services
+
+## Transport
+Transport is typically done over UDP, with a custom reliability layer. For NEX clients on the Nintendo Switch a secure WebSocket connection is used. The custom reliability layer is known as `PRUDP`, and comes in 3 variations:
+
+- `PRUDPv0` - Known simply as `PRUDP` in Rendez-Vous games. This is the default version of `PRUDP`.
+- `PRUDPv1` - Only seen in modern Nintendo games before the Nintendo Switch. `PRUDPv1` extends `PRUDP` with extra flags and features.
+- `PRUDPLite` - Only seen in Nintendo Switch titles. Connections now use a secure WebSocket rather than UDP, and packets are no longer encrypted due to the use of TLS
+
+For more detailed information on how `PRUDP` operates, see [PRUDP](/overview/prudp).
+
+## Services
+Game servers and clients provide one or many "services", also known as "protocols", to each other. In the context of this documentation, we will refer to these as "protocols". Each protocol provides a number of methods which may be called to perform actions. Once a game client has established a connection to a server using `PRUDP`, the server and client may begin sending packets whose payloads are `RMC` messages. These messages tell the recipient which service to use, and which method in the service is being called.
+
+For more detailed information on `RMC`, see [RMC](/overview/rmc).
+
+For more detailed information on available protocols, see [nex-protocols-go](/docs/nex-protocols-go).
