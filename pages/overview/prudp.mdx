@@ -1,0 +1,515 @@
+# PRUDP - Game servers
+
+## Overview
+PRUDP is a transport protocol typically built on top of UDP, which adds a custom reliability layer. There are 4 standard variations of the protocol, though they all share similar features. Generally the differences are limited to simple packet structures. All data is little-endian.
+
+NEX game servers on the Nintendo Wii U and 3DS will always either use PRUDPv0 or PRUDPv1. These protocols are built on top of UDP, and utilize encrypted packet payloads.
+
+NEX game servers on the Nintendo Switch will always use PRUDPLite. This protocol is built on top of WebSockets, and replaces payload encryption with TLS encryption over the entire connection.
+
+Rendez-Vous clients, regardless of platform, will use the original Rendez-Vous variation of PRUDP.
+
+<Warning>
+**Warning!**
+
+Due to the high level of extensibility available in Rendez-Vous, some clients may not always conform to this documentation. Just as Nintendo heavily customized Rendez-Vous to create NEX, other developers may have also made large-scale modifications.
+
+This documentation aims to support only the Nintendo-made NEX variation of Rendez-Vous, the default configuration of Rendez-Vous, and common modifications of Rendez-Vous applicable to a large range of titles.
+
+Additional research and modifications to this documentation/libraries may be required depending on the specific title.
+</Warning>
+
+## Packets
+Depending on the library variation, there are several versions of PRUDP packets and the underlying protocol. Most changes are minor, however. NEX game servers will only ever use PRUDPv0, PRUDPv1, or PRUDPLite. Non-NEX game servers will use either the default Rendez-Vous variation, or be customized in some other way.
+
+PRUDPv0 and PRUDPv1 are used by NEX game servers on the Nintendo Wii U and 3DS. Any game server which supports PRUDPv1 can also communicate using PRUDPv0. Some game servers which use PRUDPv0 may also support PRUDPv1, but this assumption is not always safe.
+
+PRUDPLite will only be used on NEX game servers on the Nintendo Switch, and is the only version supported by those clients.
+
+<Tabs items={['Rendez-Vous', 'PRUDPv0', 'PRUDPv1', 'PRUDPLite']} storageKey="prudp-version">
+	<Tabs.Tab>
+		This is the default packet format provided by Rendez-Vous. Simply known as `PRUDP` internally.
+
+		| Offset |   Size   | Description                              |
+		| :----: | :------: | :--------------------------------------- |
+		|  0x0   |    1     | Source Virtual Port                      |
+		|  0x1   |    1     | Destination Virtual Port                 |
+		|  0x2   |    1     | [Flags and type](#prudp-flags-and-types) |
+		|  0x3   |    1     | Session ID                               |
+		|  0x4   |    4     | Packet signature                         |
+		|  0x8   |    2     | [Sequence ID](#reliability)              |
+		|  0xA   | variable | Packet-specific data                     |
+		|        | variable | Payload                                  |
+		|        |  1 or 4  | [Checksum](#prudp-checksum)              |
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudp-packet-specific-data">Packet specific data</h2>
+
+		Depending on the packets type and flags, additional data may be present in the packet. This data will always come immediately before the payload.
+
+		| Only present if            | Size | Description                                   |
+		| -------------------------- | ---- | --------------------------------------------- |
+		| Type is `SYN` or `CONNECT` | 4    | [Connection signature](#connection-signature) |
+		| Type is `DATA`             | 1    | [Fragment ID](#fragment-id)                   |
+		| Flag `HAS_SIZE` is set     | 2    | Payload size                                  |
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudp-flags-and-types">Flags and type</h2>
+
+		The packets flags and packet type are stored in a single byte. The upper 5 bits represent the packets flags. The remaining 3 bits represent the packets type.
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudp-checksum">Checksum</h2>
+
+		By default a packets checksum is 1 byte. However a game may optionally be configured to use a 4 byte checksum. The checksum is calculated over the entire packet (both header and encrypted payload), using a "checksum base" to seed the algorithm. The checksum base is typically the sum of all the bytes in the game servers access key, though this is not always the case. If the following algorithms do not work for your specific title, it means one of the following:
+
+		1. The checksum base is calculated differently. For instance WATCH_DOGS on the Nintendo Wii U calculates it's checksum base by instead passing the game server access key into the checksum algorithm itself, using a default base value of 0.
+		2. The checksum is calculated over different data than the whole packet.
+		3. The algorithm used in your target game is different entirely. For instance WATCH_DOGS on the Nintendo Wii U uses a slightly different algorithm.
+
+		The following algorithms are used.
+
+		### 1 byte
+		```py
+		def calc_checksum(data: bytes, base: int) -> int:
+			"""
+			Split the data into a list of little endian uint32's
+			If there is not enough data for a uint32, discard it
+			EX: b"abcdefghijk" (0x6162636465666768696A6B)
+			becomes (1684234849, 1751606885), aka (0x64636261, 0x68676665)
+			"""
+			words = struct.unpack_from("<%iI" %(len(data) // 4), data)
+			temp = sum(words) & 0xFFFFFFFF # Add the values and truncate to a uint32
+			main = struct.pack("I", temp) # Pack the sum of the main data back into bytes
+			remaining = data[len(data) & ~3:] # The data left over from the above
+
+			checksum = base
+			checksum += sum(remaining) # Add the remaining data first
+			checksum += sum(main) # Add the main data last
+
+			return checksum & 0xFF # Truncate to a uint8
+		```
+
+		### 4 byte
+		```py
+		def calc_checksum(data: bytes, base: int) -> int:
+			data += b"\0" * (4 - len(data) % 4) # Pad data to nearest multiple of 4
+
+			"""
+			Split the data into a list of little endian uint32's
+			EX: b"abcdefgh" (0x6162636465666768)
+			becomes (1684234849, 1751606885), aka (0x64636261, 0x68676665)
+			"""
+			words = struct.unpack("<%iI" %(len(data) // 4), data)
+			checksum = base & 0xFF # Checksum base, truncated to uint8
+			checksum += sum(words) # Add the packet data sum
+
+			return checksum & 0xFFFFFFFF # Truncate to a uint32
+		```
+	</Tabs.Tab>
+
+	<Tabs.Tab>
+		PRUDPv0 is the modified version of the original Rendez-Vous packet used by NEX game servers. This packet is virtually identical to the original Rendez-Vous structure with only minor changes.
+
+		| Offset |   Size   | Description                                           |
+		| :----: | :------: | :---------------------------------------------------- |
+		|  0x0   |    1     | Source Virtual Port                                   |
+		|  0x1   |    1     | Destination Virtual Port                              |
+		|  0x2   |    2     | [Flags and type](#prudpv0-flags-and-types)            |
+		|  0x4   |    1     | Session ID                                            |
+		|  0x5   |    4     | Packet signature                                      |
+		|  0x9   |    2     | [Sequence ID](#reliability)                           |
+		|  0xB   | variable | [Packet-specific data](#prudpv0-packet-specific-data) |
+		|        | variable | Payload                                               |
+		|        |    1     | [Checksum](#prudpv0-checksum)                         |
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudpv0-packet-specific-data">Packet specific data</h2>
+
+		Depending on the packets type and flags, additional data may be present in the packet. This data will always come immediately before the payload.
+
+		| Only present if            | Size | Description                                   |
+		| -------------------------- | ---- | --------------------------------------------- |
+		| Type is `SYN` or `CONNECT` | 4    | [Connection signature](#connection-signature) |
+		| Type is `DATA`             | 1    | [Fragment ID](#fragment-id)                   |
+		| Flag `HAS_SIZE` is set     | 2    | Payload size                                  |
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudpv0-flags-and-types">Flags and type</h2>
+
+		The packets flags and packet type are stored as 2 bytes. The upper 12 bits represent the packets flags. The remaining 4 bits represent the packets type.
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudpv0-checksum">Checksum</h2>
+
+		The checksum byte is calculated over the entire packet (both header and encrypted payload), using a "checksum base" to seed the algorithm. The checksum base is the sum of all the bytes in the game servers access key.
+
+		```py
+		def calc_checksum(data: bytes, base: int) -> int:
+			"""
+			Split the data into a list of little endian uint32's
+			If there is not enough data for a uint32, discard it
+			EX: b"abcdefghijk" (0x6162636465666768696A6B)
+			becomes (1684234849, 1751606885), aka (0x64636261, 0x68676665)
+			"""
+			words = struct.unpack_from("<%iI" %(len(data) // 4), data)
+			temp = sum(words) & 0xFFFFFFFF # Add the values and truncate to a uint32
+			main = struct.pack("I", temp) # Pack the sum of the main data back into bytes
+			remaining = data[len(data) & ~3:] # The data left over from the above
+
+			checksum = base
+			checksum += sum(remaining) # Add the remaining data first
+			checksum += sum(main) # Add the main data last
+
+			return checksum & 0xFF # Truncate to a uint8
+		```
+	</Tabs.Tab>
+
+	<Tabs.Tab>
+		PRUDPv1 is an updated version of PRUDPv0. The packet now contains a magic number, uses more flags related to packet acknowledgement, uses multiple substreams, and drops the use of a checksum in favor of signatures, amoung other small changes.
+
+		| Offset |   Size   | Description                                           |
+		| :----: | :------: | :---------------------------------------------------- |
+		|  0x0   |    2     | Magic `0xEAD0`                                        |
+		|  0x2   |    12    | Header                                                |
+		|  0xE   |    16    | [Packet signature](#prudpv1-packet-signature)         |
+		|        | variable | [Packet-specific data](#prudpv1-packet-specific-data) |
+		|        | variable | Payload                                               |
+
+		## Header
+		| Offset | Size | Description                                |
+		| :----: | :--: | :----------------------------------------- |
+		|  0x0   |  1   | PRUDP version (always 1)                   |
+		|  0x1   |  1   | Packet-specific data size                  |
+		|  0x2   |  2   | Payload size                               |
+		|  0x4   |  1   | Source Virtual Port                        |
+		|  0x5   |  1   | Destination Virtual Port                   |
+		|  0x6   |  2   | [Flags and type](#prudpv1-flags-and-types) |
+		|  0x8   |  1   | Session ID                                 |
+		|  0x9   |  1   | Substream ID                               |
+		|  0xA   |  2   | [Sequence ID](#reliability)                |
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudpv1-packet-specific-data">Packet specific data</h2>
+
+		See [packet options](#packet-options).
+
+		| Option ID | Only present if            |
+		| --------- | -------------------------- |
+		| 0         | Type is `SYN` or `CONNECT` |
+		| 1         | Type is `SYN` or `CONNECT` |
+		| 2         | Type is `DATA`             |
+		| 3         | Type is `CONNECT`          |
+		| 4         | Type is `SYN` or `CONNECT` |
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudpv1-flags-and-types">Flags and type</h2>
+
+		The packets flags and packet type are stored as 2 bytes. The upper 12 bits represent the packets flags. The remaining 4 bits represent the packets type.
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudpv1-packet-signature">Packet signature</h2>
+
+		The packet signature is the HMAC-MD5 of the following data, with the key being the MD5 hash of the game server access key.
+
+		| Size        | Description                                                                                      |
+		| :---------- | :----------------------------------------------------------------------------------------------- |
+		| 8           | The packet header started at the source Virtual Port                                             |
+		| 0, 16 or 32 | The [session key](#secure-server-connection). Nothing if connecting to the authentication server |
+		| 4           | The sum of all the bytes in the game servers access key                                          |
+		| 0 or 16     | The connection signature, or nothing if it hasn't been received yet                              |
+		|             | Packet-specific data                                                                             |
+		|             | Encrypted payload                                                                                |
+	</Tabs.Tab>
+
+	<Tabs.Tab>
+		PRUDPLite is an updated version of PRUDPv1. It is only seen on the Nintendo Switch.
+
+		| Offset |   Size   | Description                                             |
+		| :----: | :------: | :------------------------------------------------------ |
+		|  0x0   |    1     | Magic `0x80`                                            |
+		|  0x1   |    1     | Packet-specific data size                               |
+		|  0x2   |    2     | Payload size                                            |
+		|  0x4   |    1     | Virtual Port stream types                               |
+		|  0x5   |    1     | Source Virtual Port stream ID                           |
+		|  0x6   |    1     | Destination Virtual Port stream ID                      |
+		|  0x7   |    1     | Fragment ID                                             |
+		|  0x8   |    2     | [Flags and type](#prudplite-flags-and-types)            |
+		|  0xA   |    2     | [Sequence ID](#reliability)                             |
+		|  0xC   | variable | [Packet-specific data](#prudplite-packet-specific-data) |
+		|        |          | Payload                                                 |
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudplite-packet-specific-data">Packet specific data</h2>
+
+		See [packet options](#packet-options).
+
+		| Option ID | Only present if                                |
+		| --------- | ---------------------------------------------- |
+		| 0         | Type is `SYN` or `CONNECT`                     |
+		| 1         | Type is `SYN` and has flag `ACK`               |
+		| 0x80      | Type is `CONNECT` and does not have flag `ACK` |
+
+		<h2 className="gd-font-bold gd-text-textHeading gd-text-xl gd-mt-10 gd-mb-4 gd-relative gd-group gd-scroll-m-48" id="prudplite-flags-and-types">Flags and type</h2>
+
+		The packets flags and packet type are stored as 2 bytes. The upper 12 bits represent the packets flags. The remaining 4 bits represent the packets type.
+	</Tabs.Tab>
+</Tabs>
+
+## Packet types
+There are 5 common packet types to Rendez-Vous. Following these 5 seem to be custom packet types (various Rendez-Vous implementations document these differently)
+
+| ID  | Name         | Description                       |
+| :-: | :----------- | :-------------------------------- |
+| 0x0 | `SYN`        | Initiate the connection           |
+| 0x1 | `CONNECT`    | Negotiate the connection settings |
+| 0x2 | `DATA`       | Game data                         |
+| 0x3 | `DISCONNECT` | Connection termination            |
+| 0x4 | `PING`       | Keeps the connection alive        |
+
+## Packet flags
+| Flag  | Name        | Description                                    |
+| :---: | :---------- | :--------------------------------------------- |
+| 0x001 | `ACK`       | This is an acknowledgement packet              |
+| 0x002 | `RELIABLE`  | This packet uses reliability                   |
+| 0x004 | `NEED_ACK`  | This packet requires acknowledgement           |
+| 0x008 | `HAS_SIZE`  | The packet data contains the payload size      |
+| 0x200 | `MULTI_ACK` | This is an acknowledgement of multiple packets |
+
+## Packet options
+Starting with PRUDPv1, packet-specific data is encoded as a series of options. Each option contains it's ID, to identify which option it is, the value size, and finally the options value.
+
+| Offset | Size | Description |
+| ------ | ---- | ----------- |
+| 0x0    | 1    | Option ID   |
+| 0x1    | 1    | Value size  |
+| 0x2    |      | Value       |
+
+| Option ID | Size | Description                                                     |
+| --------- | ---- | --------------------------------------------------------------- |
+| 0         | 4    | [Supported functions](#supported-functions)                     |
+| 1         | 16   | [Connection signature](#connection-signature)                   |
+| 2         | 1    | [Fragment id](#fragment-id)                                     |
+| 3         | 2    | Initial [sequence id](#sequence-id) for unreliable data packets |
+| 4         | 1    | Maximum [substream id](#substreams)                             |
+| 0x80      | 16   | [Lite signature](#lite-signature)                               |
+
+## Protocol
+
+### Reliability
+PRUDP was originally built on top of UDP. Later revisions of the protocol are built on top of WebSockets. To achieve reliability PRUDP uses fragment and sequence IDs, along with configurable retrasmission. These IDs are used to reorder, resend, and acknowledge reliable packets.
+
+The sequence ID is an incrementing value used to track the order the pakcets were sent in. The receiver should reorder any out of order packets before handling new ones. The counters for client->server and server->client packets are independent.
+
+Both the server and client maintain at least 3 different sequence ID counters:
+
+1. Reliable packets. These are handled by their respective reliable [substream](#substreams). Each reliable [substream](#substreams) has it's own sequence ID counter. The original Rendez-Vous library and PRUDPv0 do not support more than one reliable [substream](#substreams).
+2. [Unreliable](#unreliable-packets) `PING` packets use a separate sequence ID counter.
+2. [Unreliable](#unreliable-packets) `DATA` packets use a separate sequence ID counter.
+
+Counters typically start with ID 0, however the starting ID for [unreliable](#unreliable-packets) `DATA` packets is determined during [connection establishment](#connections) when using PRUDPv1 (starting ID is always 1 in PRUDP/PRUDPv0/PRUDPLite). The `SYN` and `CONNECT` [packet types](#packet-types) always use the default [substream](#substreams) sequence ID counter for their sequence IDs, regardless of whether the packets use the `RELIABLE` [flag](#packet-flags).
+
+The sequence ID is also used in packet [acknowledgement](#acknowledgement), to tell the sender the packet was received correctly.
+
+### Unreliable packets
+Not all packets use the available reliability features, such as packet reordering, and some features that exist as part of reliability are handled by [specific packet flags](#packet-flags), such as `NEED_ACK` for [acknowledgement](#acknowledgement).
+
+TODO - What other features make a packet unreliable??
+
+### Acknowledgement
+Acknowledgement is a feature of the reliability layer which ensures all packets are received. If a packet is not acknowledged after the configured amount of time, the sender will resend the packet. The receiver should acknowledge all packets which have the `NEED_ACK` [flag](#packet-flags) enabled.
+
+There are 2 forms of acknowledgement, individual and aggregate. Individual acknowledgement can only acknowledge a single packet at a time. Aggregate allows for more than one packet to be acknowledged at once, using either a list of [sequence IDs](#reliability), or a stop and stop range of [sequence IDs](#reliability).
+
+#### Individual acknowledgement
+When using individual acknowledgement, the receiver sends the sender a packet of the same [type](#packet-types) with the `ACK` [flag](#packet-flags). The [sequence ID](#reliability) of this packet is the same [sequence ID](#reliability) as the packet being acknowledged. This form of acknowledgement is always used in Rendez-Vous, PRUDPv0, and for the `SYN` and `CONNECT` packets during [connection establishment](#connections) even when using PRUDPv1.
+
+#### Aggregate acknowledgement
+When using aggregate acknowledgement, the receiver sends the sender a packet of the same [type](#packet-types) with the `MULTI_ACK` [flag](#packet-flags). Neither Rendez-Vous or PRUDPv0 support aggregate acknowledged. Whether or not PRUDPv1 supports aggregate acknowledgement is determined during [connection establishment](#connections).
+
+There are multiple versions of aggregate acknowledgement. Which version is being used is determined during [connection establishment](#connections) for PRUDPv1. PRUDPLite always uses the new version
+
+#### Aggregate acknowledgement (old)
+The acknowledgement packet's [sequence ID](#reliability) is set to the highest pending received [sequence ID](#reliability). All packets with [sequence IDs](#reliability) up to this [sequence ID](#reliability) are considered acknowledged. The packet may also optionally specify additional [sequence IDs](#reliability) in the payload to acknowledge.
+
+#### Aggregate acknowledgement (new)
+The [sequence ID](#reliability) of the acknowledgement packet is always 0. The packets payload now determines
+
+### Connections
+When a client wishes to establish a PRUDP connection, it first locates an [endpoint](#endpoints). How the client finds the endpoint is an implementation detail. Once the client has selected an endpoint, it selects a stream ID and stream type. See [VirtualPorts](#virtual-ports). Once the client has selected an endpoint, stream ID, and stream type, it sends the endpoint a packet of type `SYN`. The endpoint sends back an acknowledgement packet containing the calculated connection signature. Once the `SYN` packet has been acknowledged, the client selects a session ID, stores the sent connection signature, and sends the endpoint a packet of type `CONNECT`. The client `CONNECT` packet contains the endpoints connection signature, as well as the following negotiation data:
+
+***PRUDP/PRUDPv0:***
+
+Does not use negotiation data
+
+***PRUDPv1:***
+- Supported functions
+- Initial sequence ID for unreliable data packets
+- Maximum substream ID
+
+***PRUDPLite:***
+- Supported functions
+- Lite signature
+
+The endpoint uses this negotiation data, if present, to determine how to support the connection. The endpoint may terminate the connection if it believes it cannot support the connection, otherwise it decides the closest configuration to the one requested by the client. The endpoint sends back an acknowledgement packet containing it's selected negotiation data:
+
+***PRUDP/PRUDPv0:***
+
+Does not use negotiation data
+
+***PRUDPv1:***
+- Supported functions
+- Initial sequence ID for unreliable data packets
+- Maximum substream ID
+
+***PRUDPLite:***
+- Supported functions
+
+The client uses this negotiation data, if present, to determine how to support the connection. The client may terminate the connection if it believes it cannot support the connection, otherwise the connection is established and `DATA` packets may now begin being sent.
+
+When connecting to the authentication endpoint, the payload of the `CONNECT` packets should be empty. When connecting to the secure endpoint, the client should send the following payload:
+
+| Type     | Description                                           |
+| -------- | ----------------------------------------------------- |
+| [Buffer] | Kerberos ticket data                                  |
+| [Buffer] | [Kerberos-encrypted](/docs/nex/kerberos) request data |
+
+Request data (encrypted with session key):
+
+| Type   | Description          |
+| ------ | -------------------- |
+| [PID]  | User PID             |
+| Uint32 | Connection ID        |
+| Uint32 | Response check value |
+
+The secure endpoint's `CONNECT` acknowledgement packet should contain the following payload:
+
+| Type     | Description                          |
+| -------- | ------------------------------------ |
+| [Buffer] | Response check value + 1 as a uint32 |
+
+To end a connection, either side may send a `DISCONNECT` packet to the other. If the `DISCONNECT` packet has flag `RELIABLE` set, the connection is terminated gracefully. Otherwise the connection is forcibly terminated.
+
+In order to keep the connection alive, either side may send a `PING` packet to the other.
+
+### Endpoints
+PRUDP does not use the concept of a "server" in the traditional sense. Instead of connecting to a "server", connections are always made to other clients. Every client has at least one "endpoint". Every game server has at least one "server" client running, which is connected to during authentication. Once a client has passed authentication it is given a new endpoint to connect to, the secure endpoint. These connections are made using [stations](#stations). The target user of the secure endpoint is always "Quazal Rendez-Vous", PID 2. NEX is given the location of the authentication endpoint through the account server, not through a station. Presumably the target user for the authentication endpoint, typically, is always "Quazal Authentication", PID 1.
+
+### Stations
+A station represents a client who can be connected to. Each station may have one or more [endpoints](#endpoints). Each endpoint uses a unique [stream type](#virtual-ports) for various connection types.
+
+### Virtual Ports
+When multiple PRUDP connections are made to the same address, NEX doesn't create a new socket for each connection. Instead, it uses a single socket to create multiple PRUDP connections. To distinguish between connections, each packet contains a source and destination "virtual port". A "virtual port" is made of 2 parts, a stream type and stream ID. The client and server stream types will always match, though their IDs may not. How these are encoded depends on the protocol version. Each stream may be configured differently. Aspects of the connection such as retransmission rates, the encryption and compression algorithms, etc, are all controlled by these streams.
+
+**V0 and V1**: The virtual port uses a single byte. The four most significant bits contain the stream type. The four least significant bits contain the stream ID. The client stream ID is the highest unused stream ID &le; `0xF`.
+
+**Lite**: The source and destination stream IDs are now encoded using 2 separate bytes. The stream type is encoded in a 3rd byte. The four most significant bits contain the source type. The four least significant bits contain the destination type. The client stream ID is the highest unused stream ID &le; `0x1F`.
+
+**Server stream ID (3DS/Wii U)**: The authentication and secure server each have their own UDP server. The server stream ID is always 1.
+
+**Server stream ID (Switch)**: A single websocket server handles both authentication and secure connections. The authentication server has server stream ID 1, the secure server has server stream ID 2.
+
+| Stream type | Name             | Details                                                              |
+| :---------: | :--------------- | :------------------------------------------------------------------- |
+|      1      | DO               | "Duplicate Object". Use for P2P connections using NetZ               |
+|      2      | RV               | Unknown purpose                                                      |
+|      3      | OldRVSec         | Original "secure" stream type. Used by NEX 1 and QRV clients         |
+|      4      | SBMGMT           | Unknown purpose                                                      |
+|      5      | NAT              | Used for NAT traversal between users using NetZ                      |
+|      6      | SessionDiscovery | Unknown purpose                                                      |
+|      7      | NATEcho          | Unknown purpose                                                      |
+|      8      | Routing          | Unknown purpose. Not seen in non-NEX titles                          |
+|      9      | Game             | Unknown purpose. Not seen in non-NEX titles                          |
+|     10      | RVSecure         | New "secure" stream type. Used by NEX 2+. Not seen in non-NEX titles |
+|     11      | Relay            | Unknown purpose. Not seen in non-NEX titles                          |
+
+### Sandbox access key
+Every game server has a unique sandbox access key. This is used to calculate the [packet signature](#packet-signature) and [packet checksum](#checksum). All NEX titles use access keys which are 8 lowercase hex characters, with the sole exception of the Friends server whose access key is `ridfebb9`. This limitation is only imposed by NEX, however. Rendez-Vous clients do not limit themselves to 8 lowercase hex characters, and may also use uppercase and non-hex characters. It seems that the access key may also be allowed to be up to 128 characters long, though no games are currently known to use anything larger than 8.
+
+The only way to find the access key of a server is by checking the client. In most cases this involves disassembling the game, however some games have been known to store their access keys in external files. For NEX titles, tools such as [this](https://github.com/PretendoNetwork/access-key-extractor) exist to automate the extraction of these keys. A key may often times also be brute forced, as many valid keys exist for all servers due to their small size.
+
+### Encryption
+`DATA` packets may optionally encrypt their payloads. The encryption algorithm used depends on the implementation. Each [stream type](#virtual-ports) may also use a different algorithm. Only 2 algorithms are known to be used, but any could be.
+
+In legacy Rendez-Vous games, every packet is RC4 encrypted using a new stream. The key is always `CD&ML`.
+
+In NEX, a more sophisticated method is used. Each connection has an incoming and outgoing RC4 stream for each of it's substreams. When connecting to the authentication endpoint, the key for both is always `CD&ML`. When connecting to the secure endpoint, the key is the session key obtained from the Kerberos ticket during login. The streams are not reset, and packets must be processed in order.
+
+PRUDPLite never uses encryption, as the connection takes place over a secure WebSocket meaning the connection is SSL encrypted.
+
+When more than one substream is used, the session key is modified for each substream after the first. This gives each substream a unique key. The following algorithm is used to generate a new key for each substream. The previously generated key is used as the input for the next key.
+
+```py
+def modify_key(key):
+	# Only the first half of the key is modified
+	add = len(key) // 2 + 1
+	for i in range(len(key) // 2):
+		key[i] = (key[i] + add - i) & 0xFF
+```
+
+Unreliable `DATA` packets do not belong to a substream, and may be processed in any order. To solve this, a unique RC4 stream is used for each unreliable data packet. The following algorithm is used to generate a new key for each unreliable `DATA` packet.
+
+```py
+def make_unreliable_key(packet, session_key):
+	# Generate a new key from the session key
+	part1 = combine_keys(session_key, bytes.fromhex("18d8233437e4e3fe"))
+	part2 = combine_keys(session_key, bytes.fromhex("233e600123cdab80"))
+	base_key = part1 + part2
+
+	# Modify the key such that no two packets use the same key
+	key = list(base_key)
+	key[0] = (key[0] + packet.sequence_id) & 0xFF
+	key[1] = (key[1] + (packet.sequence_id >> 8)) & 0xFF
+	key[31] = (key[31] + packet.session_id) & 0xFF
+	return bytes(key)
+
+def combine_keys(key1, key2):
+	return hashlib.md5(key1 + key2).digest()
+```
+
+### Compression
+`DATA` packets may optionally encrypt their payloads. If enabled, the packets payload is compressed ***before*** it is encrypted. NEX never enables compression. Rendez-Vous is known to use both ZLIB and LZO, though any algorithm may be used.
+
+When enabled, typically the compression ratio is prepended as a single byte to the compressed payload. This is used determine how much space is needed to decompress the payload. The compression ratio is the size of the uncompressed payload divided by the size of the compressed payload, rounded up. If compression is enabled and the compression ratio is 0 the payload is not compressed.
+
+Although this is the only known format of compressed payloads, this may not be the only way payloads are encoded when compressed.
+
+### Substreams
+PRUDPv1, and only PRUDPv1, allows reliable packets to belong to one of many substreams. NEX never uses more than one substream. Each substream has it's own state regarding cipher streams, sequence IDs, retransmission, etc. The maximum number of substreams is decided during connection establishment.
+
+### Sessions
+Each connection from the client has a unique session. The client chooses it's own session ID locally. The server also chooses a session ID, which does not have to match the ID of the client. These IDs are not globally unique, and are picked at random.
+
+Each session is also secured with a session key. This is obtained from the Kerbos ticket during login. The session key is used as the starting RC4 key for packet encryption in NEX.
+
+### Fragmentation
+Large packets are split into multiple packets. The packets payload is split into fragments ***before*** it is compressed and encrypted. The max size of a payload, and thus the fragmentation size, is an implementation detail. Various games may have this configured differently. Typically it is set to the MTU minus the packet overhead.
+
+In old NEX versions, which only support PRUDPv0, the MTU is hardcoded to 1000 and the maximum payload size seems to be 962 bytes. Later, the MTU was increased to 1364, and the maximum payload size is seems to be 1300 bytes, unless PRUDPv0 is used, in which case it's 1264 bytes.
+
+Each fragmented packet payload is compressed and encrypted separately. The final packet in the fragmentation has fragment ID 0. All preceding packets have sequentially incrementing fragment IDs starting with 1. For example, if a packet is split into four fragments, they will have the following fragment IDs:
+
+| Fragment       | Fragment ID |
+| -------------- | ----------- |
+| First          | 1           |
+| Second         | 2           |
+| Third          | 3           |
+| Fourth (final) | 0           |
+
+PRUDP/PRUDPv0 only expects the fragment ID to be present on `DATA` packets. Later revisions support the fragment ID on any packet type. PRUDPv1 decides the fragment ID based on it's [options](#packet-options). The fragment ID is always present in PRUDPLite. Despite later revisions technically supporting these fragments on more than `DATA` packets, this is never seen in practice and should not be expected to function correctly.
+
+### Connection signature
+If present, the connection signature is the HMAC-MD5 of the perceived ip and port of the other endpoint. Since the client does not know it's own public address, it cannot verify this signature. The server could potentially verify this signature, if configured to know it's public address, however in practice this never happens.
+
+The server sends its connection signature in its response to the client's `SYN` packet. The client sends its connection signature in the `CONNECT` packet. Other `SYN`/`CONNECT` packets have this field set to all 0.
+
+### Lite signature
+Only seen in PRUDPLite. This signature is verified by the server, unlike the connection signature. It is the HMAC-MD5 of the following data, with the key being the MD5 hash of the sandbox access key.
+
+| Offset | Size | Description                               |
+|--------|------|-------------------------------------------|
+| 0x0    | 16   | MD5 of [access key](#sandbox-access-key)  |
+| 0x10   | 16   | Connection signature received from server |
+
+### Supported functions
+Starting with PRUDPv1, a set of "supported functions" is used during the negotiation process of connection establishment. This is a uint32, containing 3 sections. The first 3 bytes are a series of feature flags. The 4th byte is the minor version of the protocol. These are used to determine what features the other side supports. In practice the feature flags seem to be ignored. The following table lists the changes that have been made between minor versions:
+
+| Minor Version | Description                                                                                      |
+|---------------|--------------------------------------------------------------------------------------------------|
+| 0             | Base version, no aggregate ack                                                                   |
+| 1             | Aggregate ack (old version) is now supported                                                     |
+| 2             | Aggregate ack (new version) is now supported and the new signature method is used                |
+| 3             | The new RVDDL version is used: [structures](/docs/nex/types#structure) now have a version header |
+| 4             | Unknown difference                                                                               |
+| 5             | Unknown difference                                                                               |
+| 6             | Unknown difference                                                                               |

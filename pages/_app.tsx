@@ -1,6 +1,5 @@
-import type { AppProps } from 'next/app';
+import { createGuiderApp } from '@neato/guider/client';
 import '@neato/guider/style.css';
+import '@/style/style.css';
 
-export default function GuiderApp({ Component, pageProps }: AppProps) {
-	return <Component {...pageProps} />;
-}
+export default createGuiderApp();
