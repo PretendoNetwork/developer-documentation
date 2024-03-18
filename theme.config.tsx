@@ -1,10 +1,12 @@
 import { defineTheme } from '@neato/guider/theme';
 import {
 	home,
-	overview
+	overview,
+	docs
 } from './sites';
 
 export default defineTheme([
 	home,
-	overview
+	overview,
+	docs
 ]);
