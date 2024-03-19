@@ -1,1 +1,58 @@
-uwu
+---
+directory: nex-protocols-go-root
+---
+
+# `nex-protocols-go`
+
+## Overview
+`nex-protocols-go` provides a series of packages which can handle the basic handling of various RMC methods used by the [NEX](/overview/nex) [protocols](https://nintendo-wiki.pretendo.network/docs/nex/protocols). Each package, besides the `globals` package, handles a different protocol.
+
+This library only handles the decoding of incoming RMC requests, and sending response packets. The actual processing of the request data, and the creation of the RMC responses, must be defined by the developer. For a higher level API of common implementations, see below.
+
+- [nex-go](/docs/nex-go) - Barebones NEX/PRUDP server library
+- [nex-protocols-common-go](/docs/nex-protocols-common-go) - Reusable implementations for common NEX services found in many game servers
+
+## Installation
+
+```bash
+go get github.com/PretendoNetwork/nex-protocols-go
+```
+
+## Example
+```go
+package main
+
+import (
+	nex "github.com/PretendoNetwork/nex-go"
+	ticket_granting "github.com/PretendoNetwork/nex-protocols-go/ticket-granting"
+)
+
+var authServer *nex.PRUDPServer
+
+func main() {
+	// Skeleton of a Wii U/3DS Friends server running on PRUDPv0 with a single endpoint
+
+	// Create and setup the PRUDP server
+	authServer := nex.NewPRUDPServer()
+	endpoint := nex.NewPRUDPEndPoint(1)
+	endpoint.ServerAccount = nex.NewAccount(types.NewPID(1), "Quazal Authentication", "password"))
+	endpoint.AccountDetailsByPID = accountDetailsByPID
+	endpoint.AccountDetailsByUsername = accountDetailsByUsername
+
+	authServer.BindPRUDPEndPoint(endpoint)
+	authServer.SetFragmentSize(962)
+	authServer.LibraryVersions.SetDefault(nex.NewLibraryVersion(1, 1, 0))
+	authServer.SessionKeyLength = 16
+	authServer.AccessKey = "ridfebb9"
+
+	// Create and setup an instance of the TicketGranting protocol and bind it to the endpoint
+	ticketGrantingProtocol := ticket_granting.NewProtocol(endpoint)
+
+	ticketGrantingProtocol.Login = login // Handle TicketGrantingProtocol::Login RMC method
+	ticketGrantingProtocol.RequestTicket = requestTicket // Handle TicketGrantingProtocol::RequestTicket RMC method
+
+	endpoint.RegisterServiceProtocol(ticketGrantingProtocol)
+
+	authServer.Listen(60000)
+}
+```
