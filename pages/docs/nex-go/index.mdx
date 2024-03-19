@@ -1,1 +1,77 @@
-uwu
+---
+directory: nex-go-root
+---
+
+# `nex-go`
+
+## Overview
+`nex-go` is the lowest level library in the [NEX](/overview/nex) stack, written in the [Go](https://go.dev/) programming language. This library provides both the lower level transport protocols, as well as some higher level types and utility methods.
+
+For other parts of the NEX stack, see below
+
+- [nex-protocols-go](/docs/nex-protocols-go) - NEX service handlers
+- [nex-protocols-common-go](/docs/nex-protocols-common-go) - Reusable implementations for common NEX services found in many game servers
+
+## Quazal Rendez-Vous
+Nintendo did not make NEX from scratch. NEX is largely based on an existing library called Rendez-Vous, made by Canadian software company Quazal. Quazal licensed Rendez-Vous out to many other companies, and was eventually bought out by Ubisoft. Because of this, Rendez-Vous is seen in many many other games on all major platforms, especially Ubisoft.
+
+Nintendo modified Rendez-Vous somewhat heavily, simplifying the library/transport protocol quite a bit, and adding several custom services.
+
+<Note>
+While the main goal of this library is to support games which use the NEX variant of Rendez-Vous made by Nintendo, we also aim to be compatible with games using the original Rendez-Vous library. Due to the extensible nature of Rendez-Vous, many games may feature customizations much like NEX and have non-standard features/behavior. We do our best to support these cases, but there may be times where supporting all variations becomes untenable. In those cases, a fork of these libraries should be made instead if they require heavy modifications.
+</Note>
+
+## Installation
+
+```bash
+go get github.com/PretendoNetwork/nex-go
+```
+
+## Example
+```go
+package main
+
+import (
+	"fmt"
+
+	"github.com/PretendoNetwork/nex-go"
+	"github.com/PretendoNetwork/nex-go/types"
+)
+
+func main() {
+	// Skeleton of a Wii U/3DS Friends server running on PRUDPv0 with a single endpoint
+
+	authServer := nex.NewPRUDPServer() // The main PRUDP server
+	endpoint := nex.NewPRUDPEndPoint(1) // A PRUDP endpoint for PRUDP connections to connect to. Bound to StreamID 1
+	endpoint.ServerAccount = nex.NewAccount(types.NewPID(1), "Quazal Authentication", "password"))
+	endpoint.AccountDetailsByPID = accountDetailsByPID
+	endpoint.AccountDetailsByUsername = accountDetailsByUsername
+
+	// Setup event handlers for the endpoint
+	endpoint.OnData(func(packet nex.PacketInterface) {
+		if packet, ok := packet.(nex.PRUDPPacketInterface); ok {
+			request := packet.RMCMessage()
+
+			fmt.Println("[AUTH]", request.ProtocolID, request.MethodID)
+
+			if request.ProtocolID == 0xA { // TicketGrantingProtocol
+				if request.MethodID == 0x1 { // TicketGrantingProtocol::Login
+					handleLogin(packet)
+				}
+
+				if request.MethodID == 0x3 { // TicketGrantingProtocol::RequestTicket
+					handleRequestTicket(packet)
+				}
+			}
+		}
+	})
+
+	// Bind the endpoint to the server and configure it's settings
+	authServer.BindPRUDPEndPoint(endpoint)
+	authServer.SetFragmentSize(962)
+	authServer.LibraryVersions.SetDefault(nex.NewLibraryVersion(1, 1, 0))
+	authServer.SessionKeyLength = 16
+	authServer.AccessKey = "ridfebb9"
+	authServer.Listen(60000)
+}
+```
