@@ -61,7 +61,7 @@ export default site('docs-nex-protocols-go', {
 				])
 			]
 		}),
-		directory('nex-protocols-go-datasotre-struct-Protocol', {
+		directory('nex-protocols-go-datastore-struct-Protocol', {
 			sidebar: [
 				link('datastore', '/docs/nex-protocols-go/datastore'),
 				link('datastore.Protocol', '/docs/nex-protocols-go/datastore/Protocol'),
