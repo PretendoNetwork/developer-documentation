@@ -1,0 +1,60 @@
+import { CodeLinks, CodeLink } from '@/components/code-links.tsx';
+
+# `Protocol.RateObjectsWithPosting`
+
+## Type
+[comment]: <> (This is broken. See component for more details)
+<CodeLinks links={{
+	'nex.PacketInterface': 'https://google.com',
+	'types.List': 'https://google.com',
+	'datastore_types.DataStoreRatingTarget': 'https://google.com',
+	'datastore_types.DataStoreRateObjectParam': 'https://google.com',
+	'datastore_types.DataStorePreparePostParam': 'https://google.com',
+	'types.PrimitiveBool': 'https://google.com',
+	'nex.RMCMessage': 'https://google.com',
+	'nex.Error': 'https://google.com',
+}}>
+```go
+func(
+	err error,
+	packet nex.PacketInterface,
+	callID uint32,
+	targets *types.List[*datastore_types.DataStoreRatingTarget],
+	rateParams *types.List[*datastore_types.DataStoreRateObjectParam],
+	postParams *types.List[*datastore_types.DataStorePreparePostParam],
+	transactional *types.PrimitiveBool,
+	fetchRatings *types.PrimitiveBool
+) (*nex.RMCMessage, *nex.Error)
+```
+</CodeLinks>
+
+## Description
+Callback handler for the `DataStore::RateObjectsWithPosting` RMC method.
+
+Rate multiple objects at once. If a target object does not exist, initialize and rate it using the data from `postParams`. `targets`, `rateParams`, and `postParams` must all be the same length.
+
+## Parameters
+| Name          | Description                                                                                                 |
+| ------------- | ----------------------------------------------------------------------------------------------------------- |
+| err           | An error which occured during RMC decoding. Nil if no error occured                                         |
+| packet        | The source packet                                                                                           |
+| callID        | The RMC call ID                                                                                             |
+| targets       | List of DataStore objects to rate. Nil if an error occured during RMC decoding                              |
+| rateParams    | Ratings to apply to objects. Nil if an error occured during RMC decoding                                    |
+| postParams    | Object initialization data. Nil if an error occured during RMC decoding                                     |
+| transactional | If true only commit database changes if all operations succeed. Nil if an error occured during RMC decoding |
+| fetchRatings  | If true populate pRatings. Nil if an error occured during RMC decoding                                      |
+
+## Return
+| Type                                                                  | Description                                                                        |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| <CodeLink href="/docs/nex-go/RMCMessage">`*nex.RMCMessage`</CodeLink> | An RMC message of type response. Nil if an error occured during request processing |
+| <CodeLink href="/docs/nex-go/Error">`*nex.Error`</CodeLink>           | An error which occured during the request processing. Nil if no error occured      |
+
+## RMC return parameters
+| Name     | Type                                                                                                    | Description                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| pRatings | <CodeLink href="/docs/nex-go/types/List">`*types.List[*datastore_types.DataStoreRatingInfo]`</CodeLink> | New rating values for the requested objects. Only populated if fetchRatings is true |
+| pResults | <CodeLink href="/docs/nex-go/types/Result">`*types.List[*types.Result]`</CodeLink>                      | The result of each operation. Only populated if transactional is false              |
+
+[comment]: <> (The above `types.Result` does not have a valid link. Need to fix this)

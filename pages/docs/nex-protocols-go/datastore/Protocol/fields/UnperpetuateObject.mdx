@@ -1,0 +1,39 @@
+import { CodeLink } from '@/components/code-links.tsx';
+
+<Caution>
+This page is a stub, please help by contributing to the docs.
+</Caution>
+
+# `Protocol.UnperpetuateObject` handler
+
+## Type
+```go
+func(
+	err error
+	packet nex.PacketInterface
+	callID uint32
+	persistenceSlotID *types.PrimitiveU16
+	deleteLastObject *types.PrimitiveBool
+) (*nex.RMCMessage, *nex.Error)
+```
+
+## Description
+Stubbed description. Callback handler for the `DataStore::UnperpetuateObject` RMC method
+
+## Parameters
+| Name              | Description                                                         |
+| ----------------- | ------------------------------------------------------------------- |
+| err               | An error which occured during RMC decoding. Nil if no error occured |
+| packet            | The source packet                                                   |
+| callID            | The RMC call ID                                                     |
+| persistenceSlotID | Stubbed                                                             |
+| deleteLastObject  | Stubbed                                                             |
+
+## Return
+| Type                                                                  | Description                                                                        |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| <CodeLink href="/docs/nex-go/RMCMessage">`*nex.RMCMessage`</CodeLink> | An RMC message of type response. Nil if an error occured during request processing |
+| <CodeLink href="/docs/nex-go/Error">`*nex.Error`</CodeLink>           | An error which occured during the request processing. Nil if no error occured      |
+
+## RMC return parameters
+Stubbed

@@ -1,0 +1,15 @@
+# DataStore
+
+## Protocol overview
+The `DataStore` protocol is used to interact with arbitrary data. This data is referred to as "objects". Objects are always saved on the game server, and may contain a small amount of data known as the "meta binary". For larger data blobs, or for data which should be accessible outside of the game server, objects may also be linked to a physical file which is uploaded to a file server. In practice this is always an [AWS S3 instance](https://aws.amazon.com/s3/), though the way a file is uploaded is an implementation detail.
+
+Objects are ephemeral by default, only lasting the number of days specified at creation (90 by default). An object may be flagged in a way that increases this expiration time when the object is interacted with. They may also be optionally persisted to never expire.
+
+Objects may be uploaded, updated, and deleted, using a robust permissions system for both accessing and updating object data. When an object expires or is deleted, it is no longer accessible by anyone including the owner.
+
+Objects may also have ratings attached to them to score an object in game-specific ways. They may also have additional metadata, such as tags, data types, etc, attached to them for filtering and validation during searches.
+
+## Documentation
+- [Protocol](/docs/nex-protocols-go/datastore/Protocol) - Documentation on the `Protocol` struct
+- [types](/docs/nex-protocols-go/datastore/types) - Documentation on the protocol types
+- [constants](/docs/nex-protocols-go/datastore/constants) - Documentation on the protocol constants

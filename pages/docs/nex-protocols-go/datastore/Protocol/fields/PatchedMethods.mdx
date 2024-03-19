@@ -1,0 +1,11 @@
+import { CodeLink } from '@/components/code-links.tsx';
+
+# `Protocol.PatchedMethods`
+
+## Type
+```go
+[]uint32
+```
+
+## Description
+IDs of methods which have custom protocol handlers. When <CodeLink href="/docs/nex-protocols-go/datastore/Protocol/fields/Patches">`Protocol.Patches`</CodeLink> is not `nil` and an RMC method with an ID set in this slice is sent, the custom protocols handler is called instead. Used for overriding existing RMC method implementations and adding support for new/custom/game-specific RMC methods.
