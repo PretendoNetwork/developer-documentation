@@ -147,6 +147,17 @@ export default site('docs', {
 					link('utility', '/docs/nex-protocols-go/utility')
 				])
 			]
+		}),
+		directory('nex-protocols-go-datastore-root', {
+			sidebar: [
+				group('Packages', [
+					link('types', '/docs/nex-protocols-go/datastore/types'),
+					link('constants', '/docs/nex-protocols-go/datastore/constants')
+				]),
+				group('Structs', [
+					link('Protocol', '/docs/nex-protocols-go/datastore/Protocol')
+				])
+			]
 		})
 	]
 });
