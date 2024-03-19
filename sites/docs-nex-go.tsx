@@ -8,6 +8,7 @@ import siteTemplate from './common';
 
 export default site('docs-nex-go', {
 	extends: [siteTemplate],
+	github: 'PretendoNetwork/nex-go',
 	directories: [
 		// TODO - Maybe these directories should be put into their own files, like how sites are?
 		directory('root', {
